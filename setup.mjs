@@ -13,8 +13,14 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const IS_WIN = process.platform === 'win32';
-const sh = (cmd, args, opts = {}) =>
-  spawnSync(cmd, args, { stdio: 'inherit', cwd: HERE, shell: IS_WIN, ...opts });
+// npm/npx are .cmd shims on Windows and need a shell; everything else runs
+// without one, so paths with spaces ("Nuova cartella") reach it intact. With a
+// shell the command line is built here, quoted, as one string.
+const SHELL_SHIMS = new Set(['npm', 'npx']);
+const quote = (a) => (/[\s"&|<>^]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
+const sh = (cmd, args, opts = {}) => (IS_WIN && SHELL_SHIMS.has(cmd)
+  ? spawnSync([cmd, ...args].map(quote).join(' '), { stdio: 'inherit', cwd: HERE, shell: true, ...opts })
+  : spawnSync(cmd, args, { stdio: 'inherit', cwd: HERE, ...opts }));
 
 console.log('→ npm install (playwright)…');
 if (sh('npm', ['install', '--no-fund', '--no-audit']).status !== 0) process.exit(1);
@@ -53,10 +59,15 @@ if (hasChrome()) {
 const VENV = path.join(HERE, '.venv-desktop');
 const venvPython = path.join(VENV, IS_WIN ? 'Scripts' : 'bin', IS_WIN ? 'python.exe' : 'python');
 let desktopReady = fs.existsSync(venvPython);
-if (spawnSync('uv', ['--version'], { stdio: 'ignore', shell: IS_WIN }).status === 0) {
+let desktopFailed = false;
+if (spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0) {
   console.log(desktopReady ? '→ Syncing desktop venv (.venv-desktop)…' : '→ Installing desktop recording venv…');
   if (desktopReady || sh('uv', ['venv', '--python', '3.12', VENV]).status === 0) {
     desktopReady = sh('uv', ['pip', 'install', '--python', venvPython, '-r', 'requirements-desktop.txt']).status === 0;
+  }
+  if (!desktopReady) {
+    desktopFailed = true;
+    console.log('→ ERROR: the desktop venv could not be created (see the uv output above); desktop mode is unavailable.');
   }
   if (desktopReady && IS_WIN) {
     // comtypes generates its UI Automation bindings on first use; do it now
@@ -95,4 +106,8 @@ if (desktopReady && process.platform === 'darwin') {
   } catch { /* ignore */ }
 }
 
-console.log('✓ Setup complete. Link into agent directories with: node install.mjs');
+if (desktopFailed) {
+  console.log('✗ Setup incomplete: browser mode is ready, desktop mode is not (see the error above).');
+  process.exit(1);
+}
+console.log('✓ Setup complete. If you cloned with git, link into agent directories with: node install.mjs (not needed after npx skills add).');
