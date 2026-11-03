@@ -21,6 +21,18 @@ The agent then reads the recording (compact markdown summaries via the bundled s
 
 ## Install
 
+**With the [skills CLI](https://github.com/vercel-labs/skills)** (Node.js 22.20+; links the skill into 75+ agents):
+
+```bash
+npx skills add devchristian1337/record-and-replay-skill -g
+cd ~/.agents/skills/record-and-replay
+node setup.mjs      # required: the CLI copies files but runs no setup
+```
+
+Re-run `node setup.mjs` after `npx skills update` if the update replaced the folder (Playwright and the desktop venv live inside it). Set `DISABLE_TELEMETRY=1` to opt out of the CLI's anonymous install telemetry.
+
+**With git** (Node.js 18+):
+
 ```bash
 git clone https://github.com/devchristian1337/record-and-replay-skill ~/.agents/skills/record-and-replay
 cd ~/.agents/skills/record-and-replay
@@ -28,7 +40,7 @@ node setup.mjs      # npm install + (no Chrome? download Chromium) + browser & d
 node install.mjs    # link into agent skill dirs (symlink on macOS/Linux, junction on Windows)
 ```
 
-`install.mjs` links the skill into `~/.claude/skills/`, `~/.codex/skills/` and `~/.config/opencode/skills/` for every agent that is installed. For any other agent supporting the SKILL.md format, link the folder into its skill directory.
+`install.mjs` links the skill into `~/.claude/skills/`, `~/.codex/skills/` and `~/.config/opencode/skills/` for every agent that is installed. For any other agent supporting the SKILL.md format, link the folder into its skill directory. Update with `git pull && node setup.mjs`.
 
 Desktop mode's Python env (`.venv-desktop` from `requirements-desktop.txt`: pynput+mss+pillow, plus comtypes on Windows; ~50 MB) is created — and kept in sync on re-runs — by `setup.mjs` automatically when [uv](https://docs.astral.sh/uv/) is installed. Windows needs no admin rights.
 
