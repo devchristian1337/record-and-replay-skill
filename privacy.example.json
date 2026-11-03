@@ -1,0 +1,6 @@
+{
+  "excludeWindows": ["KeePass", "1Password", "Bitwarden", "(online|internet) banking"],
+  "excludeProcesses": ["KeePassXC", "1Password", "Bitwarden"],
+  "redactPatterns": ["\\b\\d{6}\\b"],
+  "useDefaultPatterns": true
+}

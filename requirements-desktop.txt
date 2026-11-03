@@ -1,0 +1,7 @@
+# Desktop recording engine (.venv-desktop, installed by `node setup.mjs` via uv).
+pynput>=1.8
+# 10.2 made an MSS instance safe to share between threads (GDI handles were thread-local before).
+mss>=10.2,<11
+pillow
+# Windows only: UI Automation client (semantic click targets + password-field detection).
+comtypes>=1.4.17; sys_platform == "win32"

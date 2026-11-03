@@ -1,0 +1,21 @@
+{
+  "name": "record-and-replay-skill",
+  "private": true,
+  "type": "module",
+  "description": "Agent-agnostic recorder that turns browser and desktop demonstrations into reusable agent skills.",
+  "scripts": {
+    "record": "node scripts/recorder.mjs",
+    "summarize": "node scripts/summarize.mjs",
+    "self-test": "node scripts/recorder.mjs --self-test",
+    "self-test:desktop": "node scripts/desktop-record.mjs selftest",
+    "self-test:export": "node scripts/export-skill.mjs --self-test",
+    "export-skill": "node scripts/export-skill.mjs",
+    "bench:browser": "node bench/browser-overhead.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "playwright": "^1.61.0"
+  }
+}
