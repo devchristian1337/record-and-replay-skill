@@ -1,6 +1,8 @@
 ---
 name: record-and-replay
 description: Records the user demonstrating a workflow in the browser or on the desktop and turns it into a reusable agent skill (a SKILL.md folder with scripts, optionally exported as a ZIP for claude.ai). Browser mode captures a Playwright event stream (events.jsonl) and trace with semantic selectors; desktop mode captures mouse, keyboard, window changes, click screenshots and accessibility targets with password fields masked, on macOS, Windows and Linux. The agent installs its own dependencies, asks what the recording cannot show, then writes and validates the skill. Use when the user says things like "watch me do this", "record what I do", "learn this workflow", "make a skill from my demo", "automate this task I repeat every day", or asks to refine an existing skill from a new demonstration, even if they never say "skill". Works in Claude Code, Codex, opencode and any agent with shell access.
+metadata:
+  version: 1.1.0
 ---
 
 # Record & Replay (browser + desktop)
@@ -29,33 +31,33 @@ After a `git clone` install (not needed after `npx skills add`), also run `node 
 
 ## Recording Workflow
 
-1. Before starting, tell the user to close windows, files and conversations they do not want captured, and not to type secrets they would not want stored. Start the recorder **detached in the background** only when the user is ready to begin. Always pass `--name <slug>` so the output directory is known up front:
+1. Before starting, tell the user to close windows, files and conversations they do not want captured, and not to type secrets they would not want stored. Start only when the user is ready. Run the recorder as a **tool-managed process whose completion the agent can receive**. Always pass `--name <slug>` so the output directory is known up front:
 
    ```bash
    cd ~/.agents/skills/record-and-replay
-   # macOS / Linux:
-   nohup node scripts/recorder.mjs --minutes 30 --name <slug> [--url <startUrl>] \
-     > ~/.agents/recordings/recorder.log 2>&1 &
-   # Windows (PowerShell):
-   Start-Process node -WindowStyle Hidden -ArgumentList "scripts/recorder.mjs","--minutes","30","--name","<slug>"
+   node scripts/recorder.mjs --minutes 30 --name <slug> [--url <startUrl>]
    ```
 
-   Agents with a native background-run facility (e.g. Claude Code's Bash `run_in_background`) may use it instead. Outputs go to `~/.agents/recordings/<slug>/`.
+   - **Codex:** run the command directly with `exec_command`, with a short `yield_time_ms`. Keep the returned `session_id`. After confirming startup and telling the user they can begin in a progress message, use `write_stdin` with empty input and waits of at most 60 seconds until the process exits. Keep the turn active while waiting; Stop completes the command and returns its final JSON. `Start-Process`, `nohup` and a shell `&` detach the recorder from this completion path, so use the direct command here.
+   - **Claude Code:** run that same command with Bash `run_in_background: true` and retain its task ID. Its native task-completion notification resumes processing after Stop; ending the turn is appropriate when that notification is available.
+   - **Other agents:** use their equivalent completion-aware process facility. If none exists, keep a tool-managed wait active. If the environment cannot do either, explain that automatic continuation is unavailable instead of promising it.
+
+   Outputs go to `~/.agents/recordings/<slug>/`. The browser uses an **in-page badge by default**; pass `--panel` only if the user asks for the separate control window. `--badge` is accepted for compatibility.
 
 2. **Verify startup once** (~2-3 seconds after launching — a single check, not a polling loop): confirm `~/.agents/recordings/<slug>/session.json` exists with `"status": "recording"` (the recorder also prints a `{"status":"recording",...}` line to the log on success). If the check fails, read the log: `recording_already_active` (exit 2) means another recording holds the lock; `launch_failed` or a missing-module error means setup is needed. Report the actual problem instead of telling the user recording has begun.
 
-3. After the startup check, **do not sleep, poll, or wait in a loop**. End your turn: tell the user recording has begun, what the time limit is, and that a small **floating control window** (bottom-right, like Codex's recording controls) has a timer plus **Pause/Resume**, **Stop** and **Discard** (tap twice to confirm) buttons. Nothing is captured while paused — events and trace both stop. If they close the control window by accident it reopens itself; closing the main browser window also ends the session (avoid quitting the browser entirely with Cmd+Q, which can lose the last minute of trace). Pass `--badge` at start to use an in-page badge instead of the control window (fallback for exotic environments).
+3. Tell the user recording has begun, the time limit, and that the **badge at the bottom-right of the page** has a timer plus **Pause/Resume** and **Stop**. Nothing is captured while paused — events and trace both stop. Tell them to press Stop when finished: the agent follows completion automatically, without a separate "done" message. Follow the agent-specific wait strategy above; use process completion rather than repeatedly reading `session.json`. In `--panel` mode, explain its additional **Discard** button (tap twice to confirm); that window reopens if closed accidentally. Closing the recorded browser also ends the session (avoid Cmd+Q, which can lose the last minute of trace).
 
-4. Pause/resume (user asks you to pause, or you need to skip a sensitive stretch): `touch ~/.agents/recordings/<slug>/PAUSE` pauses within 2 seconds; delete the file to resume. The control-window buttons and the PAUSE file stay in sync; `session.json` carries the current `paused` state. Paused intervals appear as `paused`/`resumed` markers in `events.jsonl` and are absent from the trace.
+4. Pause/resume (user asks you to pause, or you need to skip a sensitive stretch): `touch ~/.agents/recordings/<slug>/PAUSE` pauses within 2 seconds; delete the file to resume. The controls and the PAUSE file stay in sync; `session.json` carries the current `paused` state. Paused intervals appear as `paused`/`resumed` markers in `events.jsonl` and are absent from the trace.
 
-5. When the user says they are done:
-   - If the process is still running, stop it gracefully: `touch ~/.agents/recordings/<slug>/STOP` (the recorder notices within 2 seconds and finalizes).
+5. **When the recorder exits or its completion notification arrives, continue automatically**, without waiting for a chat message. If the user instead says they are done while the process is still running, stop it gracefully: `touch ~/.agents/recordings/<slug>/STOP` (the recorder notices within 2 seconds and finalizes).
+   - A nonzero exit or `status: "failed"` is a recording failure: report the actual error. Process exit alone does not mean success.
    - Read `session.json` — `status: "recording"` means still live; `"completed"` means outputs are final; `"discarded"` means the user pressed Discard — the evidence files were deleted, acknowledge and NEVER create a skill from it. `endReason` is one of `user_stopped`, `user_discarded`, `browser_closed`, `stop_file`, `time_limit`, `signal`, `event_limit`.
    - Inspect the captured events **before responding**: run `node scripts/summarize.mjs <outDir>` for a compact timeline, then read `events.jsonl` directly for steps that need detail.
 
 6. Cancellation is defined by **content, not endReason**: if the recording contains few or no `kind: "dom"` events — whatever the endReason — treat it as cancelled. Acknowledge, do not create or update a skill.
 
-7. If the recording contains enough information to identify a reusable workflow, **create or refine a skill for it by default** — even if the user did not explicitly ask. Do not stop after producing only a summary or a replay plan. Follow "Creating Skills from a Recording" below — it starts with a short clarification round.
+7. If the user said this is **only a recorder test**, report whether capture and Stop worked and finish without creating a skill or asking workflow-authoring questions. Otherwise, if the recording contains enough information to identify a reusable workflow, **create or refine a skill for it by default** — even if the user did not explicitly ask. Do not stop after producing only a summary or a replay plan. Follow "Creating Skills from a Recording" below — it starts with a short clarification round.
 
 8. If the recording is too thin or ambiguous to identify the workflow, do not guess. Explain what is unclear and ask the user for the missing pieces.
 
@@ -119,7 +121,7 @@ This is Codex-parity: Codex's Record & Replay also records an event/context stre
 Workflow mirrors browser mode (all commands cross-platform):
 
 1. Start (background is handled by the script): `node scripts/desktop-record.mjs start <slug> [minutes] [--privacy <file>]` — outputs to `~/.agents/recordings/<slug>/`. It returns only once capture is actually live, printing `{"status":"recording",...}`; on `recording_already_active` or `start_failed`, report the real problem (a `privacy_config` line in the log tail means the privacy file is invalid). If the output carries a `warning`, capture is running but will produce nothing useful — relay the warning (with `grantTo`) before telling the user to start working.
-2. **Verify once** ~10s in: `node scripts/desktop-record.mjs status <slug>` — if the user is active but `actionEvents` stays 0, permissions are missing; report `warning`/`grantTo`. Then end your turn as in browser mode (no polling).
+2. **Verify once** ~10s in: `node scripts/desktop-record.mjs status <slug>` — if the user is active but `actionEvents` stays 0, permissions are missing; report `warning`/`grantTo`. This driver detaches its capture process: the browser's command-completion strategy does not apply to desktop mode. Tell the user to request Stop in chat; do not promise automatic continuation from the driver's exit.
 3. Pause/resume: `node scripts/desktop-record.mjs pause <slug>` / `resume <slug>`. Pause closes the current segment and stops all capture; resume opens a new segment with the same privacy rules. `status` reports `paused: true`.
 4. Stop: `node scripts/desktop-record.mjs stop <slug>` — signal-free on every platform: the recorder watches a STOP file and finalizes gracefully (also auto-stops at the time limit; works from paused state too). `cleanStop: false` in the output means the fallback kill was needed.
 5. Inspect: `python3 scripts/desktop-summarize.py <outDir>` (Windows: `python scripts/desktop-summarize.py <outDir>`) → markdown timeline (window-titled sections, typed text, masked/redacted markers, clicks with their semantic target and screenshot ref, blind-spot warnings; segments merged in order with pause markers). Read a few JPEGs from `screens/` around the key moments for visual context.

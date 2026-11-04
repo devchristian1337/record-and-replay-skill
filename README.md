@@ -59,8 +59,8 @@ This opens the system dialog and the exact Settings pane, and reports `grantTo` 
 Tell your agent *"watch me do this and make it a skill"* — the skill file guides it. Manually:
 
 ```bash
-# Browser (macOS/Linux; Windows: Start-Process node …)
-nohup node scripts/recorder.mjs --minutes 30 --name my-task &
+# Browser (all platforms; badge controls by default)
+node scripts/recorder.mjs --minutes 30 --name my-task
 node scripts/summarize.mjs ~/.agents/recordings/my-task
 
 # Desktop
@@ -84,11 +84,16 @@ node scripts/export-skill.mjs ~/.agents/skills/<name>        # → ~/.agents/exp
 
 ### Recording controls
 
-- **Floating control window** (bottom-right, separate from the recorded pages — like Codex's native Recording Controls panel): live timer, **Pause/Resume**, **Stop**, and **Discard** (two-tap confirm; deletes all evidence, session ends as `discarded`). Reopens itself if closed by accident. Pass `--badge` to use an in-page badge instead.
+- **In-page badge** (default): bottom-right timer, **Pause/Resume** and **Stop**, with no separate control tab or window. `--badge` remains accepted for existing commands.
+- **Separate control window** (opt-in with `--panel`): timer, **Pause/Resume**, **Stop**, and **Discard** (two-tap confirm; deletes all evidence, session ends as `discarded`). Reopens itself if closed by accident.
 - While paused, *nothing* is captured — events **and** trace both stop.
-- Agent/file control: `touch <outDir>/PAUSE` (delete to resume), `touch <outDir>/STOP`. Stays in sync with the window buttons.
+- Agent/file control: `touch <outDir>/PAUSE` (delete to resume), `touch <outDir>/STOP`. Stays in sync with the controls.
 - Auto-stop at the time limit; closing the browser window also ends the session (avoid Cmd+Q — the last minute of the trace may be lost; everything else survives thanks to 60 s trace checkpoints).
 - Desktop pause/resume is segment-based (suspending the capture process could silently kill the macOS event tap) — the summarizer merges segments into one timeline.
+
+### Automatic continuation after browser Stop
+
+The browser recorder prints final JSON and exits after Stop has finalized the evidence. The agent must keep a completion path to that process: in **Codex**, launch it directly with `exec_command`, retain the returned session ID and continue `write_stdin` waits (at most 60 seconds each) within the active turn; in **Claude Code**, use Bash `run_in_background` and its task-completion notification. A detached `Start-Process`/`nohup` launch followed by a final chat reply loses this path. The user only needs to press **Stop**, without typing "done". An explicitly requested recorder test ends with a test result and creates no skill.
 
 ### Performance defaults (lightweight by design)
 
@@ -103,6 +108,7 @@ node scripts/export-skill.mjs ~/.agents/skills/<name>        # → ~/.agents/exp
 
 ```bash
 node scripts/recorder.mjs --self-test              # browser: end-to-end, headless
+node scripts/recorder.mjs --self-test --panel      # optional separate-window controls
 node scripts/desktop-record.mjs selftest           # desktop: end-to-end, no permissions (+ live UI Automation check on Windows)
 node scripts/export-skill.mjs --self-test          # skill validator + ZIP writer
 node bench/browser-overhead.mjs                    # in-page recorder cost

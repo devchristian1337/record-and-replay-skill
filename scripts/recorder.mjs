@@ -8,7 +8,7 @@
  *
  * Usage:
  *   node recorder.mjs [--url <startUrl>] [--minutes 30] [--name <session-name>]
- *                     [--out <dir>] [--browser chrome|chromium] [--self-test]
+ *                     [--out <dir>] [--browser chrome|chromium] [--panel] [--self-test]
  *
  * Stop conditions (whichever comes first):
  *   - user clicks the floating "Stop" button in the browser
@@ -53,9 +53,10 @@ const BROWSER_PREF = argValue('--browser', 'chrome'); // chrome | chromium
 // full (with screenshots, heavy), off (events.jsonl only).
 const TRACE_MODE = ['light', 'full', 'off'].includes(argValue('--trace', 'light'))
   ? argValue('--trace', 'light') : 'light';
-// The default control surface is a separate floating mini window (Codex style);
-// --badge falls back to an in-page badge for environments where it cannot open.
-const USE_BADGE = hasFlag('--badge');
+// Keep controls on the recorded page by default. --badge remains accepted for
+// existing callers; --panel explicitly opts into the separate control window.
+const USE_BADGE = !hasFlag('--panel');
+let selfTestControlsOk = false;
 const SESSION_NAME =
   argValue('--name') || new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 
@@ -456,7 +457,7 @@ const INIT_SCRIPT = `(() => {
     }, 1000);
   }, { capture: true, passive: true });
 
-  // --- REC badge (only in --badge mode; the default control surface is the panel)
+  // --- REC badge (default; --panel opts into the separate control window)
   if (window === window.top && ${USE_BADGE}) {
     // Node owns the authoritative pause state; button clicks go to Node, which
     // broadcasts the new state to every page via __rrSetPaused.
@@ -725,10 +726,12 @@ async function requestStop(reason) {
     // #btn2 was clicked once while paused (must drop) and once after resume → exactly one record, after resume.
     const btn2Clicks = domEvents.filter((l) => l.type === 'click' && l.target?.selectors?.id === 'btn2');
     const pauseFilterOk = btn2Clicks.length === 1 && btn2Clicks[0].seq > resumedSeq;
+    const controlsNotRecorded = !domEvents.some((l) => ['pause', 'stop'].includes(l.target?.selectors?.id));
     const ok = domEvents.some((l) => l.type === 'click') && plainInput && maskedInput && enterFlushed && submitted
-      && pausedMark && pauseFilterOk && traceChunks.length >= 2;
+      && pausedMark && pauseFilterOk && traceChunks.length >= 2
+      && selfTestControlsOk && controlsNotRecorded && reason === 'user_stopped';
     if (!ok) {
-      console.log(JSON.stringify({ pausedMark, resumedSeq, btn2Clicks: btn2Clicks.length, chunks: traceChunks.length, plainInput: !!plainInput, maskedInput: !!maskedInput, enterFlushed: !!enterFlushed, submitted }));
+      console.log(JSON.stringify({ pausedMark, resumedSeq, btn2Clicks: btn2Clicks.length, chunks: traceChunks.length, plainInput: !!plainInput, maskedInput: !!maskedInput, enterFlushed: !!enterFlushed, submitted, selfTestControlsOk, controlsNotRecorded, reason }));
     }
     console.log(ok ? 'SELF-TEST PASS' : 'SELF-TEST FAIL');
     if (OUT_DIR_IS_TEMP && ok) { try { fs.rmSync(OUT_DIR, { recursive: true, force: true }); } catch {} }
@@ -847,7 +850,7 @@ function attachPage(page) {
 context.on('page', attachPage);
 for (const page of context.pages()) attachPage(page);
 
-// --- Open the control panel (default; --badge mode uses the in-page badge instead)
+// --- Open the control panel only when --panel was requested
 const PANEL_URL = 'data:text/html,' + encodeURIComponent(PANEL_HTML.replace('%NONCE%', NONCE));
 const PANEL_BLANK_URL = `about:blank#${PANEL_MARKER}`;
 
@@ -955,7 +958,7 @@ await firstPage.goto(START_URL || START_PAGE).catch(() => {});
 await openControlPanel();
 
 // Startup confirmation: an agent that launched us in the background reads this line.
-console.log(JSON.stringify({ status: 'recording', outDir: OUT_DIR, sessionPath: SESSION_PATH, pid: process.pid, timeLimitMinutes: MINUTES }));
+console.log(JSON.stringify({ status: 'recording', controls: USE_BADGE ? 'badge' : 'panel', outDir: OUT_DIR, sessionPath: SESSION_PATH, pid: process.pid, timeLimitMinutes: MINUTES }));
 
 // Time limit + STOP/PAUSE file watcher. An agent can also pause via the file:
 // `touch <outDir>/PAUSE` → pause, delete it → resume. Edge-triggered: only the
@@ -996,25 +999,32 @@ if (SELF_TEST) {
   await page.keyboard.type('kargo takip');
   await page.keyboard.press('Enter'); // Enter-submit before the debounce fires: flush is mandatory
   await page.waitForTimeout(1500);
-  // Pause/Resume/Stop are exercised through the control panel WINDOW.
+  // Exercise the actual buttons in both the default badge and opt-in panel.
   await page.goto('data:text/html,' + encodeURIComponent('<button id="btn2">Second</button>'));
-  for (let i = 0; i < 40 && (!controlPage || controlPage.isClosed()); i += 1) {
-    await page.waitForTimeout(250);
+  if (!USE_BADGE) {
+    for (let i = 0; i < 40 && (!controlPage || controlPage.isClosed()); i += 1) {
+      await page.waitForTimeout(250);
+    }
+    if (!controlPage) {
+      console.log(JSON.stringify({ selfTestError: 'control_panel_missing' }));
+      await requestStop('self_test_done');
+    }
   }
-  if (!controlPage) {
-    console.log(JSON.stringify({ selfTestError: 'control_panel_missing' }));
-    await requestStop('self_test_done');
-  }
-  await controlPage.click('#pause');
+  const controls = USE_BADGE ? page.locator('#__rr-badge-host') : controlPage;
+  await controls.locator('#pause').waitFor({ state: 'visible' });
+  selfTestControlsOk = USE_BADGE
+    ? !context.pages().some(isPanel)
+    : await page.locator('#__rr-badge-host').count() === 0;
+  await controls.locator('#pause').click();
   await page.waitForTimeout(800);
   await page.click('#btn2'); // paused — must be dropped
   await page.waitForTimeout(400);
-  await controlPage.click('#pause'); // resume
+  await controls.locator('#pause').click(); // resume
   await page.waitForTimeout(800);
   await page.click('#btn2'); // resumed — must be recorded
   await page.waitForTimeout(600);
   try {
-    await controlPage.click('#stop'); // stop via the panel → user_stopped
+    await controls.locator('#stop').click(); // real Stop button → user_stopped
     await page.waitForTimeout(10000);
   } catch { /* stop closes the context; expected */ }
   await requestStop('self_test_done'); // safety net — a no-op if stop already ran
