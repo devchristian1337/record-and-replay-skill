@@ -8,6 +8,7 @@
 
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -60,10 +61,29 @@ const VENV = path.join(HERE, '.venv-desktop');
 const venvPython = path.join(VENV, IS_WIN ? 'Scripts' : 'bin', IS_WIN ? 'python.exe' : 'python');
 let desktopReady = fs.existsSync(venvPython);
 let desktopFailed = false;
-if (spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0) {
+
+// uv from PATH or, right after its installer ran, from the install directories
+// it uses (the agent's shell does not see the PATH change until it restarts).
+function findUv() {
+  const ok = (cmd) => spawnSync(cmd, ['--version'], { stdio: 'ignore' }).status === 0;
+  if (ok('uv')) return 'uv';
+  const exe = IS_WIN ? 'uv.exe' : 'uv';
+  const home = os.homedir();
+  const dirs = [
+    process.env.UV_INSTALL_DIR,
+    process.env.UV_INSTALL_DIR && path.join(process.env.UV_INSTALL_DIR, 'bin'),
+    process.env.XDG_BIN_HOME,
+    path.join(home, '.local', 'bin'),
+    path.join(home, '.cargo', 'bin'),
+  ].filter(Boolean);
+  return dirs.map((d) => path.join(d, exe)).find((p) => fs.existsSync(p) && ok(p)) || null;
+}
+
+const uv = findUv();
+if (uv) {
   console.log(desktopReady ? '→ Syncing desktop venv (.venv-desktop)…' : '→ Installing desktop recording venv…');
-  if (desktopReady || sh('uv', ['venv', '--python', '3.12', VENV]).status === 0) {
-    desktopReady = sh('uv', ['pip', 'install', '--python', venvPython, '-r', 'requirements-desktop.txt']).status === 0;
+  if (desktopReady || sh(uv, ['venv', '--python', '3.12', VENV]).status === 0) {
+    desktopReady = sh(uv, ['pip', 'install', '--python', venvPython, '-r', 'requirements-desktop.txt']).status === 0;
   }
   if (!desktopReady) {
     desktopFailed = true;
@@ -79,7 +99,10 @@ if (spawnSync('uv', ['--version'], { stdio: 'ignore' }).status === 0) {
 } else if (desktopReady) {
   console.log('→ Desktop venv present (.venv-desktop); install uv to keep it in sync with requirements-desktop.txt.');
 } else {
-  console.log('→ uv not found; for desktop mode install https://docs.astral.sh/uv/ and rerun `node setup.mjs` (browser mode is unaffected).');
+  console.log('→ uv not found; desktop mode needs it (browser mode is unaffected). Install it (user-level, no admin) and rerun `node setup.mjs`:');
+  console.log(IS_WIN
+    ? '    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"'
+    : '    curl -LsSf https://astral.sh/uv/install.sh | sh');
 }
 
 if (!process.argv.includes('--skip-self-test')) {

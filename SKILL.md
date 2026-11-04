@@ -12,15 +12,20 @@ Record & Replay lets an agent learn a user-demonstrated workflow and turn it int
 
 Pick browser mode whenever the workflow is browser-only — its semantic selectors produce far better skills than desktop coordinates.
 
-## Setup (once)
+## Setup preflight (run it yourself before the first recording)
 
-```bash
-cd ~/.agents/skills/record-and-replay
-node setup.mjs      # npm install + (Chromium only if Chrome is missing) + self-tests
-node install.mjs    # link into agent skill dirs (symlink on macOS/Linux, junction on Windows)
-```
+Do the setup for the user — on a fresh machine they should only have to confirm. Run these checks from the skill folder (`~/.agents/skills/record-and-replay`) before the first recording, and again whenever a recorder reports a missing module or `desktop_env_missing` (`npx skills update` can replace the folder and drop the installed dependencies). Every step is user-level: none needs admin rights.
 
-Installs the `playwright` npm package. Browsers are NOT downloaded when Google Chrome is installed (the recorder uses `channel: 'chrome'`); otherwise the script downloads Chromium. Both scripts are cross-platform (Node).
+1. **Node.js 18+** — `node --version`. If it is missing or older, the skill cannot run at all: tell the user, and with their consent install the LTS release (Windows: `winget install OpenJS.NodeJS.LTS`, which may show a UAC prompt; macOS: `brew install node`; Linux: the distro package manager or https://nodejs.org). The agent must be restarted afterwards so the new PATH is seen; say so and stop until it is.
+2. **Browser mode** — if `node_modules/playwright` is missing, run `node setup.mjs`. It installs the `playwright` npm package, downloads Chromium only when Google Chrome is not installed (the recorder uses `channel: 'chrome'`), and runs the self-tests.
+3. **Desktop mode** (only when the workflow needs it) — if `.venv-desktop` is missing, check `uv --version`. When uv is missing, tell the user you are installing [uv](https://docs.astral.sh/uv/) with Astral's official user-level installer, then run it:
+   - Windows (PowerShell): `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+   - macOS / Linux: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+   Then run `node setup.mjs` again: it finds uv in `~/.local/bin` even when the current shell's PATH has not been refreshed, downloads Python 3.12 through uv (no system Python needed) and builds `.venv-desktop`. On macOS the user must then grant permissions — see "Permissions (macOS)" below; this is the one step that cannot be automated.
+4. If `setup.mjs` exits non-zero, report the failing step from its output and do not start a recording.
+
+After a `git clone` install (not needed after `npx skills add`), also run `node install.mjs` once to link the skill into the agent skill directories.
 
 ## Recording Workflow
 
@@ -101,7 +106,7 @@ Copy this checklist and tick it off:
 
 ## Desktop recording (macOS, Windows, Linux/X11)
 
-Setup: `node setup.mjs` (creates the minimal `.venv-desktop` Python env from `requirements-desktop.txt` — pynput+mss+pillow, plus comtypes on Windows, ~50 MB; requires [uv](https://docs.astral.sh/uv/)).
+Setup: see "Setup preflight" step 3 (`node setup.mjs` creates the minimal `.venv-desktop` Python env from `requirements-desktop.txt` — pynput+mss+pillow, plus comtypes on Windows, ~50 MB; requires [uv](https://docs.astral.sh/uv/), which you install for the user when missing).
 
 **Permissions (macOS)**: the recorder preflights them and reports machine-readable state, so never guess. `start` prints `permissions: {inputMonitoring, screenRecording, grantTo}` plus a `warning` when something is missing, and automatically pops the system dialog and opens the right Settings pane (`--no-permission-prompt` disables that; `node scripts/desktop-record.mjs permissions` runs it on demand). **`grantTo` names the app the user must grant** — a TCC grant binds to the `.app` bundle hosting the agent, not to Python, and **that app must be restarted afterwards**. Relay `grantTo` verbatim; telling the user "grant it to your terminal" is usually wrong. Windows needs no permission and no admin rights.
 

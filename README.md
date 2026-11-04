@@ -21,6 +21,8 @@ The agent then reads the recording (compact markdown summaries via the bundled s
 
 ## Install
 
+**Prerequisites.** Only **Node.js** must already be on the machine (18+; 22.20+ for the skills CLI). Everything else is installed by `node setup.mjs`, and the skill tells the agent to run that preflight itself before the first recording — including installing [uv](https://docs.astral.sh/uv/) with its user-level installer when desktop mode is needed (uv then fetches Python, so no system Python is required). Nothing needs admin rights. On macOS the user still grants the desktop permissions once (see below).
+
 **With the [skills CLI](https://github.com/vercel-labs/skills)** (Node.js 22.20+; links the skill into 75+ agents):
 
 ```bash
@@ -42,7 +44,7 @@ node install.mjs    # link into agent skill dirs (symlink on macOS/Linux, juncti
 
 `install.mjs` links the skill into `~/.claude/skills/`, `~/.codex/skills/` and `~/.config/opencode/skills/` for every agent that is installed. For any other agent supporting the SKILL.md format, link the folder into its skill directory. Update with `git pull && node setup.mjs`.
 
-Desktop mode's Python env (`.venv-desktop` from `requirements-desktop.txt`: pynput+mss+pillow, plus comtypes on Windows; ~50 MB) is created — and kept in sync on re-runs — by `setup.mjs` automatically when [uv](https://docs.astral.sh/uv/) is installed. Windows needs no admin rights.
+Desktop mode's Python env (`.venv-desktop` from `requirements-desktop.txt`: pynput+mss+pillow, plus comtypes on Windows; ~50 MB) is created — and kept in sync on re-runs — by `setup.mjs` automatically when [uv](https://docs.astral.sh/uv/) is installed — also when it was installed a moment ago and the shell's PATH is not refreshed yet (it is looked up in `~/.local/bin`). Without uv, `setup.mjs` prints the install command for your platform. Windows needs no admin rights.
 
 **macOS permissions.** Desktop capture needs Accessibility/Input Monitoring and Screen Recording. Without them it records nothing at all, so the recorder preflights and reports them instead of failing quietly:
 
